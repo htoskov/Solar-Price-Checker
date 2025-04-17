@@ -70,8 +70,11 @@ def log(text):
 
 # Main logic
 def main():
-    global sunnyHoursCounter, price_above_40, hours_above_40, avgSunnyPrice
+    global sunnyHoursCounter, price_above_40, hours_above_40, avgSunnyPrice, switcher
 
+    # Based on the required price this variable will be used to initialize the ON or OFF script.
+    switcher = False
+  
     sunnyHoursCounter = 0
     price_above_40 = False
     hours_above_40 = 0
@@ -123,10 +126,24 @@ def main():
             except (IndexError, ValueError):
                 continue
 
+  # Calling the huawei logical methods
+        if switcher == True:
+            huaweiON()
+        elif switcher == False:
+            huaweiOFF()
+        
         programPrint(selected_prices)
 
     finally:
         driver.quit()
+
+def huaweiON():
+            # Here will be the Huawei interface logic to turn ON the solar plantation.
+    return
+
+def huaweiOFF():
+            # Here will be the Huawei interface logic to turn OFF the solar plantation.
+    return
 
 def programPrint(selected_prices):
     log("\n"*20)
@@ -135,7 +152,7 @@ def programPrint(selected_prices):
     log(f"Prices Tomorrow:\n{selected_prices}")
     log(f"\nHours that the price is above 40 BGN: {hours_above_40}")
     log(f"Tomorrow avg sunny price (09:00 - 20:00): {avg_price:.2f} BGN")
-    log(f"Sunny price above 40 BGN: {'Yes' if avg_price > 40 else 'No'}")
+    log(f"Sunny hours avg price above 40 BGN: {'Yes' if avg_price > 40 else 'No'}")
     log(f"\n[INFO] Checking again in 1 hour...")
 
 # Threaded Scheduler to avoid freezing the GUI
@@ -145,7 +162,6 @@ def run_schedule():
         schedule.run_pending()
         time.sleep(1)
 
-# Start first run and scheduler thread
 main()
 Thread(target=run_schedule, daemon=True).start()
 
