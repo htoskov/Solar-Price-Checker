@@ -1,11 +1,18 @@
-import subprocess
 from selenium import webdriver
+from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.chrome.service import Service
+from selenium.common.exceptions import NoSuchElementException
 from selenium.webdriver.chrome.options import Options
+from selenium.webdriver.support.wait import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
+from selenium.webdriver.common.by import By
 from selenium.common.exceptions import WebDriverException
 from bs4 import BeautifulSoup
+import requests
 import schedule
 import time
+import json
+from datetime import datetime, timedelta
 from threading import Thread
 import tkinter as tk
 from tkinter import scrolledtext
@@ -30,61 +37,37 @@ root = tk.Tk()
 root.title("Solar Price Checker")
 root.geometry("900x600")
 root.configure(bg="#1e1e1e")
-username_var = tk.StringVar()
-password_var = tk.StringVar()
-
-# Login function to connect with the Login.py script
 login_frame = tk.Frame(root, bg="#1e1e1e")
 login_frame.pack(pady=10)
 
-tk.Label(login_frame, text="Username:", fg="white", bg="#1e1e1e").grid(row=0, column=0, sticky='w')
-tk.Entry(login_frame, textvariable=username_var, width=30).grid(row=0, column=1)
-
-tk.Label(login_frame, text="Password:", fg="white", bg="#1e1e1e").grid(row=1, column=0, sticky='w')
-tk.Entry(login_frame, textvariable=password_var, show="*", width=30).grid(row=1, column=1)
-
-def run_login_script():
-    global user 
-    global pwd
-    user = username_var.get()
-    pwd = password_var.get()
-
-    if not user or not pwd:
-        log("[ERROR] Username or password cannot be empty.")
-        return
-    
-    # Remove login frame from GUI
-    login_frame.pack_forget()
-    log("[ACTION] Submitting credentials and connecting with Huawei hardware...")
-    log("[WARNING] This software will not check for valid credentials, so please make sure you enter them correctly.")
-
-login_btn = tk.Button(login_frame, text="Login", command=run_login_script, bg="#3a3a3a", fg="white")
-login_btn.grid(row=2, column=0, columnspan=2, pady=10)
+global driver
+def get_driver():
+    options = Options()
+ #  options.add_argument("--headless") 
+    service = Service(executable_path="chromedriver.exe")
+    driver = webdriver.Chrome(service=service, options=options)
+    return driver
 
 output_box = scrolledtext.ScrolledText(root, wrap=tk.WORD, font=("Consolas", 10), bg="#1e1e1e", fg="white", insertbackground="white")
 output_box.pack(padx=10, pady=10, fill=tk.BOTH, expand=True)
 
-def log(text):
-    output_box.insert(tk.END, text + "\n")
+# Colors
+output_box.tag_config("green", foreground="lime")
+output_box.tag_config("red", foreground="red")
+output_box.tag_config("white", foreground="white")
+
+def log(text, tag="white"):
+    output_box.insert(tk.END, text + "\n", tag)
     output_box.see(tk.END)
+########################################################## GUI STRUCTURE END ##########################################################
 
-# Main logic
 def main():
-    global sunnyHoursCounter, price_above_40, hours_above_40, avgSunnyPrice, switcher
+    current_hour = datetime.now().hour
+    global driver
+    driver = get_driver()
+    
 
-    # Based on the required price this variable will be used to initialize the ON or OFF script.
-    switcher = False
-  
-    sunnyHoursCounter = 0
-    price_above_40 = False
-    hours_above_40 = 0
-    avgSunnyPrice = 0.0
-
-    options = Options()
-    options.add_argument("--headless")
-    service = Service(executable_path="chromedriver.exe")
-    driver = webdriver.Chrome(service=service, options=options)
-
+    log(R)
     log("\n" + "="*70 + "\n[INFO] Checking prices...\n")
 
     try:
@@ -100,70 +83,208 @@ def main():
         if not table:
             log("[ERROR] Table not found. Retrying...")
             main()  # Retry
+            return
         else:
             log("[SUCCESS] Table located.")
 
         rows = table.find('tbody').find_all('tr')
         selected_prices = []
 
-        try:
-            first_row_last_col = rows[0].find_all('td')[-1].text.strip()
-            price = float(first_row_last_col.replace(',', ''))
-            selected_prices.append(price)
-        except ValueError:
-            pass
 
-        for i in range(2, len(rows), 2):
-            sunnyHoursCounter += 1
+        for i in range(0, len(rows), 2):
             try:
-                last_col = rows[i].find_all('td')[-1].text.strip()
-                price = float(last_col.replace(',', ''))
-                if price > 40:
-                    hours_above_40 += 1
-                if 9 <= sunnyHoursCounter <= 20:
-                    avgSunnyPrice += price
+                last_col = rows[i].find_all('td')[-2].text.strip()
+                price = float(last_col.replace(',', '').replace('лв.', ''))
                 selected_prices.append(price)
             except (IndexError, ValueError):
-                continue
+                selected_prices.append(None)
 
-  # Calling the huawei logical methods
-        if switcher == True:
-            huaweiON()
-        elif switcher == False:
-            huaweiOFF()
-        
+        # Get current hour price
+        if current_hour < len(selected_prices):
+            current_price = selected_prices[current_hour]
+            log(f"[INFO] Current hour ({current_hour}) price: {current_price} лв.")
+
+            if current_price is not None:
+                if current_price > 40:
+                    log(f"[ACTION] Price is high. Turning ON Huawei system.", tag="green")
+                    huaweiON()
+                else:
+                    log(f"[ACTION] Price is low. Turning OFF Huawei system.", tag="red")
+                    huaweiOFF()
+            else:
+                log("[WARNING] No valid price data for current hour.")
+        else:
+            log("[WARNING] Not enough hourly price data available.")
+
         programPrint(selected_prices)
 
     finally:
         driver.quit()
 
 def huaweiON():
-            # Here will be the Huawei interface logic to turn ON the solar plantation.
+    with open('credentials.json') as f:
+        credentials = json.load(f)
+    username = credentials["username"]
+    password = credentials["password"]
+    proizvodstveniSgradi = credentials["1"]
+    noviSkladove = credentials["2"]
+
+    huaweiURL = "https://eu5.fusionsolar.huawei.com/"
+    driver = get_driver()
+    time.sleep(5)
+    driver.get(huaweiURL)
+    time.sleep(5)
+    huaweiSoup = BeautifulSoup(driver.page_source, 'html.parser')
+    driver.find_element(By.ID, "username").send_keys(username)
+    time.sleep(3)
+    driver.find_element(By.ID, "value").send_keys(password)
+    time.sleep(3)
+    driver.find_element(By.CLASS_NAME, "loginBtn").click()
+    time.sleep(5)
+
+    # Proizvodstveni Sgradi Inverter
+    driver.get("https://uni002eu5.fusionsolar.huawei.com/uniportal/pvmswebsite/assets/build/cloud.html?app-id=smartpvms&instance-id=smartpvms&zone-id=region-2-aaeafa18-4690-4f82-b58f-f69e775e788c#/view/device/NE=134714396/submatrix/details")
+    button = WebDriverWait(driver, 20).until(
+    EC.element_to_be_clickable((By.XPATH, "//span[@title='Active Power Adjustment']/button"))
+    )
+    button.click()
+    time.sleep(5)
+    input_field = driver.find_element(By.CLASS_NAME, "ant-input-number-input")
+    input_field.send_keys(proizvodstveniSgradi)
+    time.sleep(5)
+    button = driver.find_element(By.XPATH, "//span[text()='Preset']/..")
+    button.click()
+    time.sleep(7)
+    button = driver.find_element(By.XPATH, "//span[text()='Execute']/..")
+    button.click()
+    time.sleep(7)
+
+    try:
+        button = driver.find_element(By.CLASS_NAME, "ant-btn-primary")
+        button.click()
+    except NoSuchElementException:
+        # Button not found, continue with the script
+        pass
+
+    log(f"[INFO] proizvodstveniSgradi inverter set to {proizvodstveniSgradi}kW")
+
+    # Novi Skladove Inverter
+    driver.get("https://uni002eu5.fusionsolar.huawei.com/uniportal/pvmswebsite/assets/build/cloud.html?app-id=smartpvms&instance-id=smartpvms&zone-id=region-2-aaeafa18-4690-4f82-b58f-f69e775e788c#/view/device/NE=134601162/submatrix/details")
+    button = WebDriverWait(driver, 20).until(
+    EC.element_to_be_clickable((By.XPATH, "//span[@title='Active Power Adjustment']/button"))
+    )
+    button.click()
+    time.sleep(5)
+    input_field = driver.find_element(By.CLASS_NAME, "ant-input-number-input")
+    input_field.send_keys(noviSkladove)
+    time.sleep(5)
+    button = driver.find_element(By.XPATH, "//span[text()='Preset']/..")
+    button.click()
+    time.sleep(7)
+    button = driver.find_element(By.XPATH, "//span[text()='Execute']/..")
+    button.click()
+    time.sleep(7)
+
+    try:
+        button = driver.find_element(By.CLASS_NAME, "ant-btn-primary")
+        button.click()
+    except NoSuchElementException:
+        # Button not found, continue with the script
+        pass
+
+    log(f"[INFO] Novi Skladove inverter set to {noviSkladove}kW")
+    driver.quit()
     return
 
 def huaweiOFF():
-            # Here will be the Huawei interface logic to turn OFF the solar plantation.
+    with open('credentials.json') as f:
+        credentials = json.load(f)
+    username = credentials["username"]
+    password = credentials["password"]
+
+    huaweiURL = "https://eu5.fusionsolar.huawei.com/"
+    driver = get_driver()
+    time.sleep(5)
+    driver.get(huaweiURL)
+    time.sleep(5)
+    huaweiSoup = BeautifulSoup(driver.page_source, 'html.parser')
+    driver.find_element(By.ID, "username").send_keys(username)
+    time.sleep(3)
+    driver.find_element(By.ID, "value").send_keys(password)
+    time.sleep(3)
+    driver.find_element(By.CLASS_NAME, "loginBtn").click()
+    time.sleep(5)
+
+    # Proizvodstveni Sgradi Inverter
+    driver.get("https://uni002eu5.fusionsolar.huawei.com/uniportal/pvmswebsite/assets/build/cloud.html?app-id=smartpvms&instance-id=smartpvms&zone-id=region-2-aaeafa18-4690-4f82-b58f-f69e775e788c#/view/device/NE=134714396/submatrix/details")
+    button = WebDriverWait(driver, 20).until(
+    EC.element_to_be_clickable((By.XPATH, "//span[@title='Active Power Adjustment']/button"))
+    )
+    button.click()
+    time.sleep(5)
+    input_field = driver.find_element(By.CLASS_NAME, "ant-input-number-input")
+    input_field.send_keys("0")
+    time.sleep(5)
+    button = driver.find_element(By.XPATH, "//span[text()='Preset']/..")
+    button.click()
+    time.sleep(7)
+    button = driver.find_element(By.XPATH, "//span[text()='Execute']/..")
+    button.click()
+    time.sleep(7)
+
+    try:
+        button = driver.find_element(By.CLASS_NAME, "ant-btn-primary")
+        button.click()
+    except NoSuchElementException:
+        # Button not found, continue with the script
+        pass
+
+    log("[INFO] proizvodstveniSgradi inverter set to 0 kW")
+
+    # Novi Skladove Inverter
+    driver.get("https://uni002eu5.fusionsolar.huawei.com/uniportal/pvmswebsite/assets/build/cloud.html?app-id=smartpvms&instance-id=smartpvms&zone-id=region-2-aaeafa18-4690-4f82-b58f-f69e775e788c#/view/device/NE=134601162/submatrix/details")
+    button = WebDriverWait(driver, 20).until(
+    EC.element_to_be_clickable((By.XPATH, "//span[@title='Active Power Adjustment']/button"))
+    )
+    button.click()
+    time.sleep(5)
+    input_field = driver.find_element(By.CLASS_NAME, "ant-input-number-input")
+    input_field.send_keys("0")
+    time.sleep(5)
+    button = driver.find_element(By.XPATH, "//span[text()='Preset']/..")
+    button.click()
+    time.sleep(7)
+    button = driver.find_element(By.XPATH, "//span[text()='Execute']/..")
+    button.click()
+    time.sleep(7)
+
+    try:
+        button = driver.find_element(By.CLASS_NAME, "ant-btn-primary")
+        button.click()
+    except NoSuchElementException:
+        # Button not found, continue with the script
+        pass
+
+    log("[INFO] Novi Skladove inverter set to 0 kW")
+    driver.quit()
     return
 
+def wait_until_next_hour():
+    now = datetime.now()
+    next_hour = (now + timedelta(hours=1)).replace(minute=0, second=0, microsecond=0)
+    sleep_seconds = (next_hour - now).total_seconds()
+    time.sleep(sleep_seconds)
+
 def programPrint(selected_prices):
-    log("\n"*20)
-    log(R)
-    avg_price = (avgSunnyPrice / 12)
+    log("\n")
     log(f"Prices Tomorrow:\n{selected_prices}")
-    log(f"\nHours that the price is above 40 BGN: {hours_above_40}")
-    log(f"Tomorrow avg sunny price (09:00 - 20:00): {avg_price:.2f} BGN")
-    log(f"Sunny hours avg price above 40 BGN: {'Yes' if avg_price > 40 else 'No'}")
-    log(f"\n[INFO] Checking again in 1 hour...")
+    log(f"\n[INFO] Checking again in the next hour...")
 
-# Threaded Scheduler to avoid freezing the GUI
-def run_schedule():
-    schedule.every().hour.do(main)
+def hourly_loop():
     while True:
-        schedule.run_pending()
-        time.sleep(1)
+        main()
+        wait_until_next_hour()
 
-main()
-Thread(target=run_schedule, daemon=True).start()
-
-# Run the GUI
+# Run the program
+Thread(target=hourly_loop, daemon=True).start()
 root.mainloop()
