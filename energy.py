@@ -1,22 +1,18 @@
 from selenium import webdriver
-from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.chrome.service import Service
-from selenium.common.exceptions import NoSuchElementException
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.support.wait import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.common.by import By
 from selenium.common.exceptions import WebDriverException
+from selenium.common.exceptions import TimeoutException
 from bs4 import BeautifulSoup
-import requests
-import schedule
 import time
 import json
 from datetime import datetime, timedelta
 from threading import Thread
 import tkinter as tk
 from tkinter import scrolledtext
-import os
 
 R = r"""
 /////////////////////////////////////////////////////////////////////////////////////////////////
@@ -35,15 +31,15 @@ URL = 'https://ibex.bg/данни-за-пазара/пазарен-сегмен�
 # GUI Initialization
 root = tk.Tk()
 root.title("Solar Price Checker")
-root.geometry("900x600")
+root.geometry("750x600")
 root.configure(bg="#1e1e1e")
 login_frame = tk.Frame(root, bg="#1e1e1e")
 login_frame.pack(pady=10)
 
-global driver
 def get_driver():
+    global driver
     options = Options()
- #  options.add_argument("--headless") 
+ #  options.add_argument("--headless")
     service = Service(executable_path="chromedriver.exe")
     driver = webdriver.Chrome(service=service, options=options)
     return driver
@@ -59,15 +55,13 @@ output_box.tag_config("white", foreground="white")
 def log(text, tag="white"):
     output_box.insert(tk.END, text + "\n", tag)
     output_box.see(tk.END)
+log(R)
 ########################################################## GUI STRUCTURE END ##########################################################
 
 def main():
     current_hour = datetime.now().hour
-    global driver
     driver = get_driver()
     
-
-    log(R)
     log("\n" + "="*70 + "\n[INFO] Checking prices...\n")
 
     try:
@@ -81,11 +75,11 @@ def main():
         soup = BeautifulSoup(driver.page_source, 'html.parser')
         table = soup.find('table', {'id': 'wpdtSimpleTable-33'})
         if not table:
-            log("[ERROR] Table not found. Retrying...")
+            log("[ERROR] IBEX Price Table not found. Retrying...")
             main()  # Retry
             return
         else:
-            log("[SUCCESS] Table located.")
+            log("[SUCCESS] IBEX Price Table located.")
 
         rows = table.find('tbody').find_all('tr')
         selected_prices = []
@@ -105,7 +99,7 @@ def main():
             log(f"[INFO] Current hour ({current_hour}) price: {current_price} лв.")
 
             if current_price is not None:
-                if current_price > 40:
+                if current_price < 40:
                     log(f"[ACTION] Price is high. Turning ON Huawei system.", tag="green")
                     huaweiON()
                 else:
@@ -116,7 +110,7 @@ def main():
         else:
             log("[WARNING] Not enough hourly price data available.")
 
-        programPrint(selected_prices)
+        log(f"\n[INFO] Checking again in the next hour...")
 
     finally:
         driver.quit()
@@ -130,7 +124,6 @@ def huaweiON():
     noviSkladove = credentials["2"]
 
     huaweiURL = "https://eu5.fusionsolar.huawei.com/"
-    driver = get_driver()
     time.sleep(5)
     driver.get(huaweiURL)
     time.sleep(5)
@@ -142,7 +135,7 @@ def huaweiON():
     driver.find_element(By.CLASS_NAME, "loginBtn").click()
     time.sleep(5)
 
-    # Proizvodstveni Sgradi Inverter
+    # 1 Inverter
     driver.get("https://uni002eu5.fusionsolar.huawei.com/uniportal/pvmswebsite/assets/build/cloud.html?app-id=smartpvms&instance-id=smartpvms&zone-id=region-2-aaeafa18-4690-4f82-b58f-f69e775e788c#/view/device/NE=134714396/submatrix/details")
     button = WebDriverWait(driver, 20).until(
     EC.element_to_be_clickable((By.XPATH, "//span[@title='Active Power Adjustment']/button"))
@@ -157,18 +150,19 @@ def huaweiON():
     time.sleep(7)
     button = driver.find_element(By.XPATH, "//span[text()='Execute']/..")
     button.click()
-    time.sleep(7)
+    time.sleep(20)
 
     try:
-        button = driver.find_element(By.CLASS_NAME, "ant-btn-primary")
+        button = WebDriverWait(driver, 5).until(
+            EC.element_to_be_clickable((By.CLASS_NAME, "ant-btn-primary"))
+        )
         button.click()
-    except NoSuchElementException:
-        # Button not found, continue with the script
+    except TimeoutException:
         pass
 
-    log(f"[INFO] proizvodstveniSgradi inverter set to {proizvodstveniSgradi}kW")
+    log(f"[INFO] 1 inverter set to {1}kW")
 
-    # Novi Skladove Inverter
+    # 2 Inverter
     driver.get("https://uni002eu5.fusionsolar.huawei.com/uniportal/pvmswebsite/assets/build/cloud.html?app-id=smartpvms&instance-id=smartpvms&zone-id=region-2-aaeafa18-4690-4f82-b58f-f69e775e788c#/view/device/NE=134601162/submatrix/details")
     button = WebDriverWait(driver, 20).until(
     EC.element_to_be_clickable((By.XPATH, "//span[@title='Active Power Adjustment']/button"))
@@ -183,16 +177,8 @@ def huaweiON():
     time.sleep(7)
     button = driver.find_element(By.XPATH, "//span[text()='Execute']/..")
     button.click()
-    time.sleep(7)
-
-    try:
-        button = driver.find_element(By.CLASS_NAME, "ant-btn-primary")
-        button.click()
-    except NoSuchElementException:
-        # Button not found, continue with the script
-        pass
-
-    log(f"[INFO] Novi Skladove inverter set to {noviSkladove}kW")
+    time.sleep(20)
+    log(f"[INFO] 2 inverter set to {2}kW")
     driver.quit()
     return
 
@@ -203,7 +189,6 @@ def huaweiOFF():
     password = credentials["password"]
 
     huaweiURL = "https://eu5.fusionsolar.huawei.com/"
-    driver = get_driver()
     time.sleep(5)
     driver.get(huaweiURL)
     time.sleep(5)
@@ -215,7 +200,7 @@ def huaweiOFF():
     driver.find_element(By.CLASS_NAME, "loginBtn").click()
     time.sleep(5)
 
-    # Proizvodstveni Sgradi Inverter
+    # 1 Inverter
     driver.get("https://uni002eu5.fusionsolar.huawei.com/uniportal/pvmswebsite/assets/build/cloud.html?app-id=smartpvms&instance-id=smartpvms&zone-id=region-2-aaeafa18-4690-4f82-b58f-f69e775e788c#/view/device/NE=134714396/submatrix/details")
     button = WebDriverWait(driver, 20).until(
     EC.element_to_be_clickable((By.XPATH, "//span[@title='Active Power Adjustment']/button"))
@@ -230,18 +215,19 @@ def huaweiOFF():
     time.sleep(7)
     button = driver.find_element(By.XPATH, "//span[text()='Execute']/..")
     button.click()
-    time.sleep(7)
+    time.sleep(20)
 
     try:
-        button = driver.find_element(By.CLASS_NAME, "ant-btn-primary")
+        button = WebDriverWait(driver, 5).until(
+            EC.element_to_be_clickable((By.CLASS_NAME, "ant-btn-primary"))
+        )
         button.click()
-    except NoSuchElementException:
-        # Button not found, continue with the script
+    except TimeoutException:
         pass
 
-    log("[INFO] proizvodstveniSgradi inverter set to 0 kW")
+    log("[INFO] 1 inverter set to 0 kW")
 
-    # Novi Skladove Inverter
+    # 2 Inverter
     driver.get("https://uni002eu5.fusionsolar.huawei.com/uniportal/pvmswebsite/assets/build/cloud.html?app-id=smartpvms&instance-id=smartpvms&zone-id=region-2-aaeafa18-4690-4f82-b58f-f69e775e788c#/view/device/NE=134601162/submatrix/details")
     button = WebDriverWait(driver, 20).until(
     EC.element_to_be_clickable((By.XPATH, "//span[@title='Active Power Adjustment']/button"))
@@ -256,16 +242,8 @@ def huaweiOFF():
     time.sleep(7)
     button = driver.find_element(By.XPATH, "//span[text()='Execute']/..")
     button.click()
-    time.sleep(7)
-
-    try:
-        button = driver.find_element(By.CLASS_NAME, "ant-btn-primary")
-        button.click()
-    except NoSuchElementException:
-        # Button not found, continue with the script
-        pass
-
-    log("[INFO] Novi Skladove inverter set to 0 kW")
+    time.sleep(20)
+    log("[INFO] 2 inverter set to 0 kW")
     driver.quit()
     return
 
@@ -275,14 +253,12 @@ def wait_until_next_hour():
     sleep_seconds = (next_hour - now).total_seconds()
     time.sleep(sleep_seconds)
 
-def programPrint(selected_prices):
-    log("\n")
-    log(f"Prices Tomorrow:\n{selected_prices}")
-    log(f"\n[INFO] Checking again in the next hour...")
-
 def hourly_loop():
     while True:
-        main()
+        try:
+            main()
+        except Exception as e:
+            log(f"[ERROR] Main loop error: {e}", tag="red")
         wait_until_next_hour()
 
 # Run the program
