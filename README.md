@@ -1,5 +1,5 @@
 
-# Solar Power Price Checker
+# Solar Power Price Checker (Project is still raw version)
 
 Electricity prices nowadays can vary a lot during the summer days and sometimes selling the generated power from our solar plantations comes at a loss. In order to deal with the fluctuation of the prices I have come up with an idea to track them hour by hour automatically thanks to Python.
 
@@ -21,6 +21,7 @@ The software has a few security measures set to not blow up the program, such as
 
 ## Future Improvements
 
+- Improve syntax, add dynamic wait times until objects are present to speed up the application, as it is still raw version.
 - On the first run automatically inspect the user solar plantation and generate a config file for each inverter and a variable for power usage.
 - Automatically save hourly log with messages from each function in the software and send it via email to the user to monitor proper functioning.
 - Application could be made into a Web Application customized for each user if the project ever gets released to the market.
