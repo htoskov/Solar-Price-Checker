@@ -1,3 +1,4 @@
+energy.py is old version with a lot of bugs, newer version will not be uploaded due to project going into market, however feel free to reach out for more information regarding the project.
 
 # Solar Power Price Checker (Project is still raw version)
 
